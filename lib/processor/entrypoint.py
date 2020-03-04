@@ -1,26 +1,41 @@
+import base64
 import json
-import os
-import logging
-import time
 
 import uuid as uuid
-from bottle import Bottle, HTTPResponse
 
-import config
+from lib.misc.task import Task
+from lib.processor.processor_factory import ProcessorFactory
 
-app = Bottle()
-uuid = str(uuid.uuid4())
-
-
-@app.route("/", method=["POST"])
-def main():
-    # Busy sleep
-    start = time.time()
-    while time.time() - start < 10:
-        pass
-
-    return HTTPResponse(status=200, body=json.dumps({"message": uuid}))
+UUID = str(uuid.uuid4())
 
 
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+def main(event):
+    enveloppe = event.get_json()
+    task_json = json.loads(
+        base64.b64decode(enveloppe["message"]["data"]).decode("utf8")
+    )
+    print(task_json)
+
+    task = _build_task_object(task_json)
+
+    task.update_attribute("container_instance", UUID)
+    task.update_status("running")
+
+    processor = ProcessorFactory(task.kwargs["processor_name"]).get_processor()(task)
+
+    try:
+        processor.run()
+        task.update_status("done")
+    except Exception:
+        task.update_status("failed")
+
+    return "OK"
+
+
+def _build_task_object(task_json):
+    return Task(
+        task_id=task_json.pop("id"),
+        status=task_json.pop("status"),
+        start=task_json.pop("start"),
+        **task_json,
+    )

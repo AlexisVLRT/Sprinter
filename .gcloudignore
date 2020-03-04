@@ -1,0 +1,7 @@
+.git
+.gitignore
+.idea
+__pycache__
+secrets
+venv
+_func_deployment_package

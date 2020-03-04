@@ -1,4 +1,7 @@
 ENV ?= dev
+PROCESSOR_PATH ?= lib/processor
+BROKER_PATH ?= lib/broker
+
 include environments/${ENV}
 
 
@@ -40,17 +43,43 @@ define docker_push
 endef
 
 define deploy_cloud_run
-	gcloud beta run deploy $(1)\
+	gcloud beta run deploy $(1) \
 	 --image $(2) \
 	 --platform=managed \
 	 --region=europe-west1 \
 	 --service-account=$(3)\
 	 --allow-unauthenticated \
+	 --memory $(5) \
 	 $(4)
 endef
 
+define create_topic
+	gcloud pubsub topics describe $(1) \
+	|| \
+	gcloud pubsub topics create $(1)
+endef
+
+define create_push_sub
+	gcloud pubsub subscriptions describe $(1) \
+	|| \
+	gcloud pubsub subscriptions create \
+	  --topic=$(2) \
+	  --push-endpoint=$(3) \
+	  --ack-deadline=600 \
+	  $(1)
+endef
+
+define create_pull_sub
+	gcloud pubsub subscriptions describe $(1) \
+	|| \
+	gcloud pubsub subscriptions create \
+	  --topic=$(2)\
+	  --ack-deadline=600 \
+	  $(1)
+endef
+
 ######################################
-# Credentials
+## CREDENTIALS
 .PHONY: create_service_account
 create_service_account:
 	$(call create_service_account,$(SERVICE_ACCOUNT_ID),generic dev account)
@@ -75,30 +104,68 @@ create_data_bucket:
 
 ######################################
 ## CLOUD RUN
+.PHONY: build_broker_container
+build_broker_container:
+	$(call docker_build,${BROKER_CONTAINER},${BROKER_PATH}/Dockerfile,.)
 
-.PHONY: build_processor_container
-build_processor_container:
-	$(call docker_build,${PROCESSOR_CONTAINER},${PROCESSOR_PATH}/Dockerfile,.)
+.PHONY: push_broker_container
+push_broker_container: build_broker_container
+	$(call docker_push,${BROKER_CONTAINER},${BROKER_GCR_PATH})
 
-.PHONY: push_processor_container
-push_processor_container: build_processor_container
-	$(call docker_push,${PROCESSOR_CONTAINER},${PROCESSOR_GCR_PATH})
-
-.PHONY: deploy_processor
-deploy_processor: push_processor_container
-	$(call deploy_cloud_run,${PROCESSOR_SERVICE},${PROCESSOR_GCR_PATH},${SERVICE_ACCOUNT},--update-env-vars ENV=${ENV})
+.PHONY: deploy_broker
+deploy_broker: push_broker_container
+	$(call deploy_cloud_run,${BROKER_SERVICE},${BROKER_GCR_PATH},${SERVICE_ACCOUNT},--update-env-vars ENV=${ENV}, ${BROKER_MEMORY})
 
 
 ######################################
 ## PUB/SUB
-.PHONY: create_topic
-create_topic:
-	gcloud pubsub topics create ${BROKER_TOPIC}
+.PHONY: create_broker_topic
+create_broker_topic:
+	$(call create_topic,${BROKER_TOPIC})
 
-.PHONY: create_sub
-create_sub:
-	gcloud pubsub subscriptions create \
-	  --topic=${BROKER_TOPIC}\
-	  --push-endpoint=https://processor-dev-7juntucg4q-ew.a.run.app \
-	  --ack-deadline=90 \
-	  ${BROKER_SUB}
+.PHONY: create_broker_sub
+create_broker_sub: create_broker_topic
+	$(call create_push_sub,${BROKER_SUB},${BROKER_TOPIC},${PROCESSOR_ENDPOINT})
+
+.PHONY: create_buffer_topic
+create_buffer_topic:
+	$(call create_topic,${TASKS_BUFFER_TOPIC})
+
+.PHONY: create_buffer_sub
+create_buffer_sub: create_buffer_topic
+	$(call create_pull_sub,${TASKS_BUFFER_SUB},${TASKS_BUFFER_TOPIC})
+
+
+#####################################
+## DATASTORE
+.PHONY: delete_jobs
+delete_jobs:
+	python -c """from lib.cloud_utils.datastore import Datastore; Datastore.instance().delete_entities('Job', {})"""
+
+.PHONY: delete_tasks
+delete_tasks:
+	python -c """from lib.cloud_utils.datastore import Datastore; Datastore.instance().delete_entities('Task', {})"""
+
+.PHONY: delete_entities
+delete_entities: delete_jobs delete_tasks
+
+
+#####################################
+## FUNCTIONS
+.PHONY: deploy_function
+deploy_function:
+	python bin/function_deployer.py
+
+
+#####################################
+## RUN
+.PHONY: misc_automation
+misc_automation:
+	python bin/misc_automation.py
+
+.PHONY: deploy
+deploy: misc_automation deploy_broker deploy_function
+
+.PHONY: run
+run: delete_entities
+	python bin/end_to_end.py

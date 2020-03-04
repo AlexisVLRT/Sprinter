@@ -27,7 +27,7 @@ def env_vars_to_config_file():
 
 
 def generate_reqs():
-    check_output(["pip freeze > requirements.txt"], shell=True)
+    check_output(["pipdeptree | egrep -v '^\s*(#| |$)' > requirements.txt"], shell=True)
 
 
 def black():
