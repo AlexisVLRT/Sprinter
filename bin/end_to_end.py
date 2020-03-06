@@ -13,7 +13,7 @@ def new_job(n_tasks: int = 1) -> Job:
     print("Creating tasks")
     start = time.time()
     for _ in range(n_tasks):
-        task = Task(job.id, new_entity=True, ticker="AAPL", processor_name="busy_sleep")
+        task = Task(job.id, new_entity=True, processor_name="busy_sleep")
         job.add_task(task)
 
     print(f"Done in {time.time() - start}")
@@ -30,11 +30,9 @@ def start_processing(job: Job):
     print(
         check_output([f"curl -X get {config.BROKER_ENDPOINT}/run/{job.id}"], shell=True)
     )
-    # check_output([f"curl -X get 0.0.0.0:8080/run/{job.id}"], shell=True)
 
 
 if __name__ == "__main__":
-    job = new_job(2000)
+    job = new_job(1)
     time.sleep(1)
     start_processing(job)
-    # job.delete_from_datastore()
