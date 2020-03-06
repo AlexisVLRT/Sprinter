@@ -1,5 +1,4 @@
 ENV ?= dev
-PROCESSOR_PATH ?= lib/processor
 BROKER_PATH ?= lib/broker
 
 include environments/${ENV}
@@ -92,8 +91,12 @@ get_gcp_credentials:
 give_admin_role:
 	$(call service_account_add_role,$(PROJECT),$(SERVICE_ACCOUNT_ID),admin)
 
+.PHONY: link_docker_gcr
+link_docker_gcr:
+	gcloud auth login
+
 .PHONY: setup_creds
-setup_creds:create_service_account give_admin_role get_gcp_credentials
+setup_creds:create_service_account give_admin_role get_gcp_credentials link_docker_gcr
 
 ######################################
 ## STORAGE
@@ -127,14 +130,8 @@ create_broker_topic:
 create_broker_sub: create_broker_topic
 	$(call create_push_sub,${BROKER_SUB},${BROKER_TOPIC},${PROCESSOR_ENDPOINT})
 
-.PHONY: create_buffer_topic
-create_buffer_topic:
-	$(call create_topic,${TASKS_BUFFER_TOPIC})
-
-.PHONY: create_buffer_sub
-create_buffer_sub: create_buffer_topic
-	$(call create_pull_sub,${TASKS_BUFFER_SUB},${TASKS_BUFFER_TOPIC})
-
+.PHONY: init_pubsub
+init_pubsub: create_broker_topic create_broker_sub
 
 #####################################
 ## DATASTORE
@@ -155,6 +152,24 @@ delete_entities: delete_jobs delete_tasks
 .PHONY: deploy_function
 deploy_function:
 	python bin/function_deployer.py
+
+
+#####################################
+## INIT
+.PHONY: init_env
+init_env:
+	python bin/env_update.py --update-type init
+
+.PHONY: env_add_broker_endpoint
+env_add_broker_endpoint:
+	python bin/env_update.py --update-type broker_endpoint
+
+.PHONY: init_project
+init_project: init_env misc_automation
+	make init_project_2
+
+.PHONY: init_project_2
+init_project_2: setup_creds create_data_bucket init_pubsub deploy_broker env_add_broker_endpoint misc_automation deploy_function
 
 
 #####################################
