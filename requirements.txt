@@ -1,5 +1,5 @@
 black==19.10b0
-bottle==0.12.18
+bottle==0.12.20
 google-cloud-datastore==1.10.0
 google-cloud-logging==1.14.0
 google-cloud-pubsub==1.3.0
